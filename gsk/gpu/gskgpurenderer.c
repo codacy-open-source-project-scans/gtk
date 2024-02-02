@@ -119,7 +119,7 @@ gsk_gpu_renderer_dmabuf_downloader_download (GdkDmabufDownloader *downloader,
   frame = gsk_gpu_renderer_create_frame (self);
 
   gsk_gpu_frame_download_texture (frame,
-                                  g_get_monotonic_time(),
+                                  g_get_monotonic_time (),
                                   GDK_TEXTURE (texture),
                                   format,
                                   data,
@@ -301,7 +301,7 @@ gsk_gpu_renderer_fallback_render_texture (GskGpuRenderer        *self,
 
           frame = gsk_gpu_renderer_create_frame (self);
           gsk_gpu_frame_render (frame,
-                                g_get_monotonic_time(),
+                                g_get_monotonic_time (),
                                 image,
                                 NULL,
                                 root,
@@ -343,6 +343,8 @@ gsk_gpu_renderer_render_texture (GskRenderer           *renderer,
   GdkTexture *texture;
   graphene_rect_t rounded_viewport;
 
+  gsk_gpu_device_maybe_gc (priv->device);
+
   gsk_gpu_renderer_make_current (self);
 
   rounded_viewport = GRAPHENE_RECT_INIT (viewport->origin.x,
@@ -353,6 +355,7 @@ gsk_gpu_renderer_render_texture (GskRenderer           *renderer,
                                                 gsk_render_node_get_preferred_depth (root),
                                                 rounded_viewport.size.width,
                                                 rounded_viewport.size.height);
+
   if (image == NULL)
     return gsk_gpu_renderer_fallback_render_texture (self, root, &rounded_viewport);
 
@@ -360,7 +363,7 @@ gsk_gpu_renderer_render_texture (GskRenderer           *renderer,
 
   texture = NULL;
   gsk_gpu_frame_render (frame,
-                        g_get_monotonic_time(),
+                        g_get_monotonic_time (),
                         image,
                         NULL,
                         root,
@@ -369,6 +372,8 @@ gsk_gpu_renderer_render_texture (GskRenderer           *renderer,
 
   g_object_unref (frame);
   g_object_unref (image);
+
+  gsk_gpu_device_queue_gc (priv->device);
 
   /* check that callback setting texture was actually called, as its technically async */
   g_assert (texture);
@@ -398,6 +403,8 @@ gsk_gpu_renderer_render (GskRenderer          *renderer,
                                      gsk_render_node_get_preferred_depth (root),
                                      region);
 
+  gsk_gpu_device_maybe_gc (priv->device);
+
   gsk_gpu_renderer_make_current (self);
 
   backbuffer = GSK_GPU_RENDERER_GET_CLASS (self)->get_backbuffer (self);
@@ -407,7 +414,7 @@ gsk_gpu_renderer_render (GskRenderer          *renderer,
   surface = gdk_draw_context_get_surface (priv->context);
 
   gsk_gpu_frame_render (frame,
-                        g_get_monotonic_time(),
+                        g_get_monotonic_time (),
                         backbuffer,
                         render_region,
                         root,
@@ -417,6 +424,8 @@ gsk_gpu_renderer_render (GskRenderer          *renderer,
                           gdk_surface_get_height (surface)
                         ),
                         NULL);
+
+  gsk_gpu_device_queue_gc (priv->device);
 
   gdk_draw_context_end_frame (priv->context);
 

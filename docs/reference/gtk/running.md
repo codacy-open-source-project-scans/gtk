@@ -220,8 +220,8 @@ A number of options affect behavior instead of logging:
 `gl-disable`
 : Disable OpenGL support
 
-`gl-fractional`
-: Enable fractional scaling for OpenGL. This is experimental
+`gl-no-fractional`
+: Disable fractional scaling for OpenGL.
 
 `gl-debug`
 : Insert debugging information in OpenGL
@@ -459,6 +459,13 @@ disable certain optimizations of the "ngl" and "vulkan" renderer.
 
 The special value `all` can be used to turn on all values. The special
 value `help` can be used to obtain a list of all supported values.
+
+### `GSK_CACHE_TIMEOUT`
+
+Overrides the timeout for cache GC in the "ngl" and "vulkan" renderers.
+The value can be -1 to disable GC entirely, 0 to force GC to happen
+before every frame, or a positive number to do GC in a timeout every
+n seconds. The default timeout is 15 seconds.
 
 ### `GSK_MAX_TEXTURE_SIZE`
 
