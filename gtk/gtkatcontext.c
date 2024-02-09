@@ -484,6 +484,9 @@ gtk_at_context_get_accessible_parent (GtkATContext *self)
   return self->accessible_parent;
 }
 
+
+static GtkATContext * get_parent_context (GtkATContext *self);
+
 /*< private >
  * gtk_at_context_set_accessible_parent:
  * @self: a `GtkAtContext`
@@ -505,8 +508,16 @@ gtk_at_context_set_accessible_parent (GtkATContext *self,
 
       self->accessible_parent = parent;
       if (self->accessible_parent != NULL)
-        g_object_add_weak_pointer (G_OBJECT (self->accessible_parent),
-                                   (gpointer *) &self->accessible_parent);
+        {
+          GtkATContext *parent_context = NULL;
+
+          g_object_add_weak_pointer (G_OBJECT (self->accessible_parent),
+                                     (gpointer *) &self->accessible_parent);
+
+          parent_context = get_parent_context (self);
+          if (parent_context && parent_context->realized)
+            gtk_at_context_realize (self);
+        }
     }
 }
 
@@ -1461,4 +1472,15 @@ gtk_at_context_child_changed (GtkATContext             *self,
     return;
 
   GTK_AT_CONTEXT_GET_CLASS (self)->child_change (self, change, child);
+}
+
+void
+gtk_at_context_announce (GtkATContext                      *self,
+                         const char                        *message,
+                         GtkAccessibleAnnouncementPriority  priority)
+{
+  if (!self->realized)
+    return;
+
+  GTK_AT_CONTEXT_GET_CLASS (self)->announce (self, message, priority);
 }

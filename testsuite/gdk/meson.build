@@ -60,9 +60,11 @@ internal_tests = [
   { 'name': 'image' },
   { 'name': 'texture' },
   { 'name': 'gltexture' },
+  { 'name': 'subsurface' },
 ]
 
 if host_machine.system() != 'windows'
+  internal_tests += { 'name': 'dmabufformats' }
   internal_tests += { 'name': 'dmabuftexture', 'suites': 'failing' }
 endif
 

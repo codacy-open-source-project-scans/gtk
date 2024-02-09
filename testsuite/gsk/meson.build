@@ -36,6 +36,7 @@ compare_render_tests = [
   'clip-in-rounded-clip1',
   'clip-in-rounded-clip2',
   'clip-in-rounded-clip3',
+  'clip-in-smaller-rounded-clip',
   'clip-intersection-fail-opacity-nogl',
   'clipped-repeat',
   'clipped_rounded_clip',
@@ -107,6 +108,7 @@ compare_render_tests = [
   'outset_shadow_offset_x',
   'outset_shadow_offset_y',
   'outset_shadow_rounded_top',
+  'outset-shadow-scale-offset',
   'outset_shadow_simple',
   'radial-gradient-with-64-colorstops',
   'repeat',
@@ -464,7 +466,7 @@ if os_linux
           'G_TEST_BUILDDIR=@0@'.format(meson.current_build_dir())
         ],
         protocol: 'exitcode',
-        suite: 'gsk',
+        suite: ['gsk', 'offload'],
       )
     endif
   endforeach
