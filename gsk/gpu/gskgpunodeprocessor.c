@@ -42,6 +42,12 @@
 #include "gsktransformprivate.h"
 
 #include "gdk/gdkrgbaprivate.h"
+#include "gdk/gdksubsurfaceprivate.h"
+
+/* the epsilon we allow pixels to be off due to rounding errors.
+ * Chosen rather randomly.
+ */
+#define EPSILON 0.001
 
 /* A note about coordinate systems
  *
@@ -338,8 +344,8 @@ gsk_gpu_node_processor_init_draw (GskGpuNodeProcessor   *self,
 
   area.x = 0;
   area.y = 0;
-  area.width = ceilf (graphene_vec2_get_x (scale) * viewport->size.width);
-  area.height = ceilf (graphene_vec2_get_y (scale) * viewport->size.height);
+  area.width = ceilf (graphene_vec2_get_x (scale) * viewport->size.width - EPSILON);
+  area.height = ceilf (graphene_vec2_get_y (scale) * viewport->size.height - EPSILON);
 
   image = gsk_gpu_device_create_offscreen_image (gsk_gpu_frame_get_device (frame),
                                                  FALSE,
@@ -562,7 +568,6 @@ extract_scale_from_transform (GskTransform *transform,
     {
     default:
       g_assert_not_reached ();
-      G_GNUC_FALLTHROUGH;
     case GSK_TRANSFORM_CATEGORY_IDENTITY:
     case GSK_TRANSFORM_CATEGORY_2D_TRANSLATE:
       *out_scale_x = 1.0f;
@@ -733,6 +738,30 @@ gsk_gpu_node_processor_image_op (GskGpuNodeProcessor   *self,
     }
 }
 
+static GskGpuImage *
+gsk_gpu_node_processor_create_offscreen (GskGpuFrame           *frame,
+                                         const graphene_vec2_t *scale,
+                                         const graphene_rect_t *viewport,
+                                         GskRenderNode         *node)
+{
+  GskGpuNodeProcessor self;
+  GskGpuImage *image;
+
+  image = gsk_gpu_node_processor_init_draw (&self,
+                                            frame,
+                                            gsk_render_node_get_preferred_depth (node),
+                                            scale,
+                                            viewport);
+  if (image == NULL)
+    return NULL;
+
+  gsk_gpu_node_processor_add_node (&self, node);
+
+  gsk_gpu_node_processor_finish_draw (&self, image);
+
+  return image;
+}
+
 /*
  * gsk_gpu_get_node_as_image:
  * @frame: frame to render in
@@ -762,7 +791,6 @@ gsk_gpu_get_node_as_image (GskGpuFrame            *frame,
                            GskRenderNode          *node,
                            graphene_rect_t        *out_bounds)
 {
-  graphene_rect_t clipped;
   GskGpuImage *result;
 
   switch ((guint) gsk_render_node_get_node_type (node))
@@ -785,37 +813,29 @@ gsk_gpu_get_node_as_image (GskGpuFrame            *frame,
       }
 
     case GSK_CAIRO_NODE:
-      gsk_rect_intersection (clip_bounds, &node->bounds, &clipped);
-      if (gsk_rect_is_empty (&clipped))
-        return NULL;
-
       result = gsk_gpu_upload_cairo_op (frame,
                                         scale,
-                                        &clipped,
+                                        clip_bounds,
                                         (GskGpuCairoFunc) gsk_render_node_draw_fallback,
                                         gsk_render_node_ref (node),
                                         (GDestroyNotify) gsk_render_node_unref);
 
       g_object_ref (result);
 
-      *out_bounds = clipped;
+      *out_bounds = *clip_bounds;
       return result;
 
     default:
       break;
     }
 
-  gsk_rect_intersection (clip_bounds, &node->bounds, &clipped);
-  if (gsk_rect_is_empty (&clipped))
-    return NULL;
-
   GSK_DEBUG (FALLBACK, "Offscreening node '%s'", g_type_name_from_instance ((GTypeInstance *) node));
-  result = gsk_gpu_render_pass_op_offscreen (frame,
-                                             scale,
-                                             &clipped,
-                                             node);
+  result = gsk_gpu_node_processor_create_offscreen (frame,
+                                                    scale,
+                                                    clip_bounds,
+                                                    node);
 
-  *out_bounds = clipped;
+  *out_bounds = *clip_bounds;
   return result;
 }
 
@@ -936,9 +956,13 @@ gsk_gpu_node_processor_get_node_as_image (GskGpuNodeProcessor   *self,
     {
       if (!gsk_gpu_node_processor_clip_node_bounds (self, node, &clip))
         return NULL;
-      clip_bounds = &clip;
     }
-  rect_round_to_pixels (clip_bounds, &self->scale, &self->offset, &clip);
+  else
+    {
+      if (!gsk_rect_intersection (clip_bounds, &node->bounds, &clip))
+        return NULL;
+    }
+  rect_round_to_pixels (&clip, &self->scale, &self->offset, &clip);
 
   image = gsk_gpu_get_node_as_image (self->frame,
                                      &clip,
@@ -983,36 +1007,25 @@ gsk_gpu_node_processor_blur_op (GskGpuNodeProcessor       *self,
   graphene_vec2_t direction;
   graphene_rect_t clip_rect, intermediate_rect;
   graphene_point_t real_offset;
-  int width, height;
   float clip_radius;
 
   clip_radius = gsk_cairo_blur_compute_pixels (blur_radius / 2.0);
 
   /* FIXME: Handle clip radius growing the clip too much */
   gsk_gpu_node_processor_get_clip_bounds (self, &clip_rect);
+  clip_rect.origin.x -= shadow_offset->x;
+  clip_rect.origin.y -= shadow_offset->y;
   graphene_rect_inset (&clip_rect, 0.f, -clip_radius);
   if (!gsk_rect_intersection (rect, &clip_rect, &intermediate_rect))
     return;
 
-  width = ceilf (graphene_vec2_get_x (&self->scale) * intermediate_rect.size.width);
-  height = ceilf (graphene_vec2_get_y (&self->scale) * intermediate_rect.size.height);
+  rect_round_to_pixels (&intermediate_rect, &self->scale, &self->offset, &intermediate_rect);
 
-  intermediate = gsk_gpu_device_create_offscreen_image (gsk_gpu_frame_get_device (self->frame),
-                                                        FALSE,
-                                                        source_depth,
-                                                        width, height);
-
-  gsk_gpu_node_processor_init (&other,
-                               self->frame,
-                               source_desc,
-                               intermediate,
-                               &(cairo_rectangle_int_t) { 0, 0, width, height },
-                               &intermediate_rect);
-
-  gsk_gpu_render_pass_begin_op (other.frame,
-                                intermediate,
-                                &(cairo_rectangle_int_t) { 0, 0, width, height },
-                                GSK_RENDER_PASS_OFFSCREEN);
+  intermediate = gsk_gpu_node_processor_init_draw (&other,
+                                                   self->frame,
+                                                   source_depth,
+                                                   &self->scale,
+                                                   &intermediate_rect);
 
   gsk_gpu_node_processor_sync_globals (&other, 0);
 
@@ -1026,11 +1039,7 @@ gsk_gpu_node_processor_blur_op (GskGpuNodeProcessor       *self,
                    source_rect,
                    &direction);
 
-  gsk_gpu_render_pass_end_op (other.frame,
-                              intermediate,
-                              GSK_RENDER_PASS_OFFSCREEN);
-
-  gsk_gpu_node_processor_finish (&other);
+  gsk_gpu_node_processor_finish_draw (&other, intermediate);
 
   real_offset = GRAPHENE_POINT_INIT (self->offset.x + shadow_offset->x,
                                      self->offset.y + shadow_offset->y);
@@ -2053,13 +2062,21 @@ gsk_gpu_node_processor_add_texture_scale_node (GskGpuNodeProcessor *self,
       GskGpuImage *offscreen;
       graphene_rect_t clip_bounds;
 
-      if (!gsk_gpu_node_processor_clip_node_bounds (self, node, &clip_bounds))
-        return;
+      gsk_gpu_node_processor_get_clip_bounds (self, &clip_bounds);
+      /* first round to pixel boundaries, so we make sure the full pixels are covered */
+      rect_round_to_pixels (&clip_bounds, &self->scale, &self->offset, &clip_bounds);
+      /* then expand by half a pixel so that pixels needed for eventual linear
+       * filtering are available */
+      graphene_rect_inset (&clip_bounds, -0.5, -0.5);
+      /* finally, round to full pixels */
       gsk_rect_round_larger (&clip_bounds);
-      offscreen = gsk_gpu_render_pass_op_offscreen (self->frame,
-                                                    graphene_vec2_one (),
-                                                    &clip_bounds,
-                                                    node);
+      /* now intersect with actual node bounds */
+      if (!gsk_rect_intersection (&clip_bounds, &node->bounds, &clip_bounds))
+        return;
+      offscreen = gsk_gpu_node_processor_create_offscreen (self->frame,
+                                                           graphene_vec2_one (),
+                                                           &clip_bounds,
+                                                           node);
       descriptor = gsk_gpu_node_processor_add_image (self, offscreen, GSK_GPU_SAMPLER_DEFAULT);
       gsk_gpu_texture_op (self->frame,
                           gsk_gpu_clip_get_shader_clip (&self->clip, &self->offset, &node->bounds),
@@ -3252,10 +3269,10 @@ gsk_gpu_node_processor_repeat_tile (GskGpuNodeProcessor    *self,
     }
 
   GSK_DEBUG (FALLBACK, "Offscreening node '%s' for tiling", g_type_name_from_instance ((GTypeInstance *) child));
-  image = gsk_gpu_render_pass_op_offscreen (self->frame,
-                                            &self->scale,
-                                            &clipped_child_bounds,
-                                            child);
+  image = gsk_gpu_node_processor_create_offscreen (self->frame,
+                                                   &self->scale,
+                                                   &clipped_child_bounds,
+                                                   child);
 
   g_return_if_fail (image);
 
@@ -3728,6 +3745,12 @@ static void
 gsk_gpu_node_processor_add_container_node (GskGpuNodeProcessor *self,
                                            GskRenderNode       *node)
 {
+  if (self->opacity < 1.0 && !gsk_container_node_is_disjoint (node))
+    {
+      gsk_gpu_node_processor_add_without_opacity (self, node);
+      return;
+    }
+
   for (guint i = 0; i < gsk_container_node_get_n_children (node); i++)
     gsk_gpu_node_processor_add_node (self, gsk_container_node_get_child (node, i));
 }
@@ -3767,7 +3790,7 @@ static const struct
   },
   [GSK_CONTAINER_NODE] = {
     GSK_GPU_GLOBAL_MATRIX | GSK_GPU_GLOBAL_SCALE | GSK_GPU_GLOBAL_CLIP | GSK_GPU_GLOBAL_SCISSOR,
-    0,
+    GSK_GPU_HANDLE_OPACITY,
     gsk_gpu_node_processor_add_container_node,
     NULL,
   },

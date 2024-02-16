@@ -79,6 +79,7 @@
 #include "gdkdebugprivate.h"
 #include "gdkdisplayprivate.h"
 #include "gdkdmabufeglprivate.h"
+#include "gdkdmabuffourccprivate.h"
 #include "gdkmemoryformatprivate.h"
 #include "gdkmemorytextureprivate.h"
 #include "gdkprofilerprivate.h"
@@ -96,10 +97,6 @@
 #include <epoxy/gl.h>
 #ifdef HAVE_EGL
 #include <epoxy/egl.h>
-#endif
-
-#ifdef HAVE_DMABUF
-#include <drm_fourcc.h>
 #endif
 
 #include <math.h>
@@ -1718,7 +1715,7 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
     }
 
   priv->has_half_float = gdk_gl_context_check_version (context, "3.0", "3.0") ||
-                         epoxy_has_gl_extension ("OES_vertex_half_float");
+                         epoxy_has_gl_extension ("GL_OES_vertex_half_float");
 
   priv->has_sync = gdk_gl_context_check_version (context, "3.2", "3.0") ||
                    epoxy_has_gl_extension ("GL_ARB_sync") ||
