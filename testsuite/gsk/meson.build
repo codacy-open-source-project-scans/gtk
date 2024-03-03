@@ -82,6 +82,10 @@ compare_render_tests = [
   'fill-with-3d-contents-nogl-nocairo',
   'glyph-cache-overflow',
   'glyph-cache-overflow-slices',
+  'glyph-hinting-none',
+  'glyph-hinting-slight',
+  'glyph-scaling',
+  'glyph-antialias',
   'huge-height',
   'huge-width',
   'inset-shadow-multiple',
@@ -178,6 +182,7 @@ informative_render_tests = [
   'empty-text',
   'huge-glyph',
   'rounded-clip-in-clip-nocairo', # both cairo and gl fail this one
+  'text-missing-glyph', # https://gitlab.gnome.org/GNOME/pango/-/merge_requests/718
 ]
 
 renderers = [
@@ -193,6 +198,7 @@ compare_xfails_small_texture = [
   'big-checkerboard-scaled-down',
   'big-checkerboard-scaled-down2',
   'repeat-repeats', # only fails when rotated
+  'glyph-scaling',
 ]
 
 variants = {
@@ -207,13 +213,13 @@ variants = {
 
 compare_xfails = {
   'ngl': {
-           'repeat-scaling': ['clipped'], # 6429
-           'radial-gradient-with-64-colorstops': ['clipped'],
-           'blur-child-bounds-oversize-nogl': ['clipped'], # 6450
-         },
+    'repeat-scaling': ['clipped'], # 6429
+    'radial-gradient-with-64-colorstops': ['clipped'],
+    'blur-child-bounds-oversize-nogl': ['clipped'], # 6450
+  },
   'vulkan': {
-              'big-checkerboard': ['clipped'], # 6444
-            },
+    'big-checkerboard': ['clipped'], # 6444
+  },
 }
 
 foreach renderer : renderers
@@ -372,6 +378,7 @@ node_parser_tests = [
   'stroke.node',
   'stroke.ref.node',
   'testswitch.node',
+  'text.node',
   'text-color.node',
   'text-fail.node',
   'text-fail.ref.node',
@@ -381,6 +388,11 @@ node_parser_tests = [
   'text-font-errors.node',
   'text-font-errors.ref.node',
   'text-font-errors.errors',
+  'text-font-options.node',
+  'text-font-options.ref.node',
+  'text-font-options-error.node',
+  'text-font-options-error.ref.node',
+  'text-font-options-error.ref.errors',
   'text-no-color.node',
   'texture-fail.node',
   'texture-fail.ref.node',
@@ -411,7 +423,7 @@ foreach test : node_parser_tests
         'G_TEST_BUILDDIR=@0@'.format(meson.current_build_dir())
       ],
       protocol: 'exitcode',
-      suite: 'gsk',
+      suite: [ 'gsk', 'gsk-nodeparser' ]
     )
   endif
 endforeach

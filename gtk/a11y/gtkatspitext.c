@@ -234,7 +234,8 @@ accessible_text_handle_method (GDBusConnection       *connection,
       gsize n_ranges;
       GtkAccessibleTextRange *ranges = NULL;
 
-      gtk_accessible_text_get_selection (accessible_text, &n_ranges, &ranges);
+      if (!gtk_accessible_text_get_selection (accessible_text, &n_ranges, &ranges))
+        n_ranges = 0;
 
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(i)", (int)n_ranges));
 
@@ -248,7 +249,8 @@ accessible_text_handle_method (GDBusConnection       *connection,
 
       g_variant_get (parameters, "(i)", &num);
 
-      gtk_accessible_text_get_selection (accessible_text, &n_ranges, &ranges);
+      if (!gtk_accessible_text_get_selection (accessible_text, &n_ranges, &ranges))
+        n_ranges = 0;
 
       if (num < 0 || num >= n_ranges)
         g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "Not a valid selection: %d", num);
@@ -1056,15 +1058,20 @@ gtk_editable_get_text_widget (GtkWidget *widget)
 {
   if (GTK_IS_EDITABLE (widget))
     {
-      GtkEditable *delegate;
+      GtkEditable *editable;
+      guint redirects = 0;
 
-      delegate = gtk_editable_get_delegate (GTK_EDITABLE (widget));
+      editable = GTK_EDITABLE (widget);
 
-      if (GTK_IS_TEXT (delegate))
-        return GTK_TEXT (delegate);
+      do {
+        if (GTK_IS_TEXT (editable))
+          return GTK_TEXT (editable);
 
-      if (GTK_IS_TEXT (widget))
-        return GTK_TEXT (widget);
+        if (++redirects >= 6)
+          g_assert_not_reached ();
+
+        editable = gtk_editable_get_delegate (editable);
+      } while (editable != NULL);
     }
 
   return NULL;
