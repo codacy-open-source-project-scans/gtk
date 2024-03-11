@@ -29,6 +29,7 @@
 
 #include "a11y/atspi/atspi-text.h"
 
+#include "gtkaccessibletextprivate.h"
 #include "gtkatcontextprivate.h"
 #include "gtkdebug.h"
 #include "gtkeditable.h"
@@ -41,7 +42,6 @@
 #include "gtkspinbuttonprivate.h"
 #include "gtktextbufferprivate.h"
 #include "gtktextviewprivate.h"
-#include "gtkaccessibletext-private.h"
 
 #include <gio/gio.h>
 
@@ -222,12 +222,64 @@ accessible_text_handle_method (GDBusConnection       *connection,
     }
   else if (g_strcmp0 (method_name, "GetAttributeRun") == 0)
     {
-      g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED, "");
+      GVariantBuilder builder = G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE ("a{ss}"));
+      gboolean include_defaults = FALSE;
+      int offset;
+      gsize n_ranges = 0;
+      GtkAccessibleTextRange *ranges = NULL;
+      int start, end;
+      char **attr_names = NULL;
+      char **attr_values = NULL;
+      gboolean res;
+
+      g_variant_get (parameters, "(ib)", &offset, &include_defaults);
+
+      res = gtk_accessible_text_get_attributes_run (accessible_text,
+                                                    offset,
+                                                    include_defaults,
+                                                    &n_ranges,
+                                                    &ranges,
+                                                    &attr_names,
+                                                    &attr_values);
+      if (!res)
+        {
+          /* No attributes */
+          g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a{ss}ii)", &builder, 0, 0));
+          return;
+        }
+
+      for (unsigned i = 0; attr_names[i] != NULL; i++)
+        g_variant_builder_add (&builder, "{ss}", attr_names[i], attr_values[i]);
+
+      start = 0;
+      end = G_MAXINT;
+      for (unsigned i = 0; i < n_ranges; i++)
+        {
+          start = MAX (start, ranges[i].start);
+          end = MIN (end, start + ranges[i].length);
+        }
+
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a{ss}ii)", &builder, start, end));
+
+      g_clear_pointer (&ranges, g_free);
+      g_strfreev (attr_names);
+      g_strfreev (attr_values);
     }
   else if (g_strcmp0 (method_name, "GetDefaultAttributes") == 0 ||
            g_strcmp0 (method_name, "GetDefaultAttributeSet") == 0)
     {
-      g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED, "");
+      GVariantBuilder builder = G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE ("a{ss}"));
+      char **names, **values;
+
+      gtk_accessible_text_get_default_attributes (accessible_text, &names, &values);
+
+      for (unsigned i = 0; names[i] != NULL; i++)
+        g_variant_builder_add (&builder, "{ss}", names[i], values[i]);
+
+      g_strfreev (names);
+      g_strfreev (values);
+
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a{ss})", &builder));
     }
   else if (g_strcmp0 (method_name, "GetNSelections") == 0)
     {
@@ -1616,63 +1668,79 @@ text_view_handle_method (GDBusConnection       *connection,
     }
   else if (g_strcmp0 (method_name, "GetAttributes") == 0)
     {
-      GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (widget));
       GVariantBuilder builder = G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE ("a{ss}"));
+      GHashTable *attrs;
+      GHashTableIter iter;
       int offset;
       int start, end;
+      gpointer key, value;
 
       g_variant_get (parameters, "(i)", &offset);
 
-      gtk_text_buffer_get_run_attributes (buffer, &builder, offset, &start, &end);
+      attrs = gtk_text_view_get_attributes_run (GTK_TEXT_VIEW (widget), offset, FALSE, &start, &end);
+      g_hash_table_iter_init (&iter, attrs);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        g_variant_builder_add (&builder, "{ss}", key, value != NULL ? value : "");
 
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a{ss}ii)", &builder, start, end));
+
+      g_hash_table_unref (attrs);
     }
   else if (g_strcmp0 (method_name, "GetAttributeValue") == 0)
     {
-      GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (widget));
-      GVariantBuilder builder = G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE ("a{ss}"));
       int offset;
       const char *name;
       int start, end;
-      GVariant *attrs;
       const char *val;
+      GHashTable *attrs;
 
       g_variant_get (parameters, "(i&s)", &offset, &name);
 
-      gtk_text_buffer_get_run_attributes (buffer, &builder, offset, &start, &end);
-
-      attrs = g_variant_builder_end (&builder);
-      if (!g_variant_lookup (attrs, name, "&s", &val))
+      attrs = gtk_text_view_get_attributes_run (GTK_TEXT_VIEW (widget), offset, FALSE, &start, &end);
+      val = g_hash_table_lookup (attrs, name);
+      if (val == NULL)
         val = "";
 
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(s)", val));
-      g_variant_unref (attrs);
+      g_hash_table_unref (attrs);
     }
   else if (g_strcmp0 (method_name, "GetAttributeRun") == 0)
     {
-      GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (widget));
       GVariantBuilder builder = G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE ("a{ss}"));
       int offset;
       gboolean include_defaults;
       int start, end;
+      GHashTable *attrs;
+      GHashTableIter iter;
+      gpointer key, value;
 
       g_variant_get (parameters, "(ib)", &offset, &include_defaults);
 
-      if (include_defaults)
-        gtk_text_view_add_default_attributes (GTK_TEXT_VIEW (widget), &builder);
-
-      gtk_text_buffer_get_run_attributes (buffer, &builder, offset, &start, &end);
+      attrs = gtk_text_view_get_attributes_run (GTK_TEXT_VIEW (widget), offset, include_defaults, &start, &end);
+      g_hash_table_iter_init (&iter, attrs);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        g_variant_builder_add (&builder, "{ss}", key, value != NULL ? value : "");
 
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a{ss}ii)", &builder, start, end));
+
+      g_hash_table_unref (attrs);
     }
   else if (g_strcmp0 (method_name, "GetDefaultAttributes") == 0 ||
            g_strcmp0 (method_name, "GetDefaultAttributeSet") == 0)
     {
       GVariantBuilder builder = G_VARIANT_BUILDER_INIT (G_VARIANT_TYPE ("a{ss}"));
+      GHashTable *attrs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+      GHashTableIter iter;
+      gpointer key, value;
 
-      gtk_text_view_add_default_attributes (GTK_TEXT_VIEW (widget), &builder);
+      gtk_text_view_add_default_attributes (GTK_TEXT_VIEW (widget), attrs);
+      g_hash_table_iter_init (&iter, attrs);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        g_variant_builder_add (&builder, "{ss}", key, value != NULL ? value : "");
 
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a{ss})", &builder));
+
+      g_hash_table_unref (attrs);
     }
   else if (g_strcmp0 (method_name, "GetNSelections") == 0)
     {

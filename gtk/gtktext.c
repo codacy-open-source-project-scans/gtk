@@ -23,8 +23,9 @@
 
 #include "gtktextprivate.h"
 
-#include "gtkaccessibletext-private.h"
+#include "gtkaccessibletextprivate.h"
 #include "gtkactionable.h"
+#include "gtkactionmuxerprivate.h"
 #include "gtkadjustment.h"
 #include "gtkbox.h"
 #include "gtkbutton.h"
@@ -46,19 +47,20 @@
 #include "gtkimcontextprivate.h"
 #include "gtkimcontextsimple.h"
 #include "gtkimmulticontext.h"
-#include <glib/gi18n-lib.h>
+#include "gtkjoinedmenuprivate.h"
 #include "gtklabel.h"
 #include "gtkmagnifierprivate.h"
 #include "gtkmain.h"
 #include "gtkmarshalers.h"
+#include "gtknative.h"
 #include "gtkpangoprivate.h"
 #include "gtkpopovermenu.h"
 #include "gtkprivate.h"
-#include "gtksettings.h"
-#include "gtksnapshot.h"
 #include "gtkrenderbackgroundprivate.h"
 #include "gtkrenderborderprivate.h"
 #include "gtkrenderlayoutprivate.h"
+#include "gtksettings.h"
+#include "gtksnapshot.h"
 #include "gtktexthandleprivate.h"
 #include "gtktexthistoryprivate.h"
 #include "gtktextutilprivate.h"
@@ -66,15 +68,13 @@
 #include "gtktypebuiltins.h"
 #include "gtkwidgetprivate.h"
 #include "gtkwindow.h"
-#include "gtknative.h"
-#include "gtkactionmuxerprivate.h"
-#include "gtkjoinedmenuprivate.h"
+
 #include "deprecated/gtkrender.h"
-#include "gtkaccessibletext-private.h"
 #include "a11y/gtkatspipangoprivate.h"
 
-#include <cairo-gobject.h>
 #include <string.h>
+#include <cairo-gobject.h>
+#include <glib/gi18n-lib.h>
 
 /**
  * GtkText:
@@ -7472,6 +7472,19 @@ gtk_text_accessible_text_get_contents (GtkAccessibleText *self,
   return g_bytes_new_take (string, size);
 }
 
+static GBytes *
+gtk_text_accessible_text_get_contents_at (GtkAccessibleText            *self,
+                                          unsigned int                  offset,
+                                          GtkAccessibleTextGranularity  granularity,
+                                          unsigned int                 *start,
+                                          unsigned int                 *end)
+{
+  PangoLayout *layout = gtk_text_get_layout (GTK_TEXT (self));
+  char *string = gtk_pango_get_string_at (layout, offset, granularity, start, end);
+
+  return g_bytes_new_take (string, strlen (string));
+}
+
 static unsigned int
 gtk_text_accessible_text_get_caret_position (GtkAccessibleText *self)
 {
@@ -7528,12 +7541,28 @@ gtk_text_accessible_text_get_attributes (GtkAccessibleText        *self,
 }
 
 static void
+gtk_text_accessible_text_get_default_attributes (GtkAccessibleText   *self,
+                                                 char              ***attribute_names,
+                                                 char              ***attribute_values)
+{
+  PangoLayout *layout = gtk_text_get_layout (GTK_TEXT (self));
+  char **names, **values;
+
+  gtk_pango_get_default_attributes (layout, &names, &values);
+
+  *attribute_names = names;
+  *attribute_values = values;
+}
+
+static void
 gtk_text_accessible_text_init (GtkAccessibleTextInterface *iface)
 {
   iface->get_contents = gtk_text_accessible_text_get_contents;
+  iface->get_contents_at = gtk_text_accessible_text_get_contents_at;
   iface->get_caret_position = gtk_text_accessible_text_get_caret_position;
   iface->get_selection = gtk_text_accessible_text_get_selection;
   iface->get_attributes = gtk_text_accessible_text_get_attributes;
+  iface->get_default_attributes = gtk_text_accessible_text_get_default_attributes;
 }
 
 /* vim:set foldmethod=marker expandtab: */
