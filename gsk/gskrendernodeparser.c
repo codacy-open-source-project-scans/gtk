@@ -2345,7 +2345,7 @@ parse_text_node (GtkCssParser *parser,
       g_assert (font);
     }
 
-  hinted = gsk_get_hinted_font (font, hint_style, antialias);
+  hinted = gsk_reload_font (font, 1.0, CAIRO_HINT_METRICS_OFF, hint_style, antialias);
   g_object_unref (font);
   font = hinted;
 
@@ -4466,6 +4466,8 @@ render_node_print (Printer       *p,
         start_node (p, "subsurface", node_name);
 
         append_node_param (p, "child", gsk_subsurface_node_get_child (node));
+
+        end_node (p);
       }
       break;
 

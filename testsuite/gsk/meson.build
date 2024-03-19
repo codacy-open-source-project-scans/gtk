@@ -136,6 +136,7 @@ compare_render_tests = [
   'repeat-scaling',
   'repeat-texture',
   'repeating-gradient-scaled',
+  'reuse-of-texture-nested-in-offscreens',
   'rounded-clip-with-huge-bounds-nogl',
   'scale-textures-negative-ngl',
   'scale-up-down',
@@ -224,6 +225,8 @@ compare_xfails = {
     'radial-gradient-with-64-colorstops': ['clipped', 'colorflipped'],
     'conic-gradient-with-64-colorstops': ['clipped', 'colorflipped'],
     'blur-child-bounds-oversize-nogl': ['clipped'], # 6450
+    'rounded-clip-with-huge-bounds-nogl': ['plain','flipped','rotated','repeated','masked','replayed','clipped','colorflipped'], # 6532
+    'big-checkerboard': ['clipped'], # 6444
   },
   'vulkan': {
     'radial-gradient-with-64-colorstops': ['clipped', 'colorflipped'],
@@ -231,6 +234,8 @@ compare_xfails = {
     'blur-child-bounds-oversize-nogl': ['clipped'], # 6450
     'repeat-repeats-nested-nogl': ['clipped'], # 6522
     'repeating-radial-gradient-edge-colors': ['colorflipped'],
+    'rounded-clip-with-huge-bounds-nogl': ['plain','flipped','rotated','repeated','masked','replayed','clipped','colorflipped'], # 6532
+    'big-checkerboard': ['clipped'], # 6444
   },
   'gl': {
     # 6525
@@ -359,6 +364,8 @@ node_parser_tests = [
   'empty-shadow.ref.node',
   'empty-stroke.node',
   'empty-stroke.ref.node',
+  'empty-subsurface.node',
+  'empty-subsurface.ref.node',
   'empty-text.node',
   'empty-text.ref.node',
   'empty-texture.node',

@@ -40,7 +40,6 @@
 #include "gtkdragsourceprivate.h"
 #include "gtkdropcontrollermotion.h"
 #include "gtkemojichooser.h"
-#include "gtkimcontextprivate.h"
 #include "gtkimmulticontext.h"
 #include "gtkjoinedmenuprivate.h"
 #include "gtkmagnifierprivate.h"
@@ -831,6 +830,17 @@ add_move_binding (GtkWidgetClass *widget_class,
 }
 
 static void
+gtk_text_view_notify (GObject    *object,
+                      GParamSpec *pspec)
+{
+  if (pspec->name == I_("has-focus"))
+    gtk_text_view_check_cursor_blink (GTK_TEXT_VIEW (object));
+
+  if (G_OBJECT_CLASS (gtk_text_view_parent_class)->notify)
+    G_OBJECT_CLASS (gtk_text_view_parent_class)->notify (object, pspec);
+}
+
+static void
 gtk_text_view_class_init (GtkTextViewClass *klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
@@ -842,6 +852,7 @@ gtk_text_view_class_init (GtkTextViewClass *klass)
   gobject_class->get_property = gtk_text_view_get_property;
   gobject_class->finalize = gtk_text_view_finalize;
   gobject_class->dispose = gtk_text_view_dispose;
+  gobject_class->notify = gtk_text_view_notify;
 
   widget_class->realize = gtk_text_view_realize;
   widget_class->unrealize = gtk_text_view_unrealize;
@@ -5764,6 +5775,8 @@ gtk_text_view_click_gesture_released (GtkGestureClick *gesture,
                                       double           y,
                                       GtkTextView     *text_view)
 {
+  GdkEvent *event =
+    gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (gesture));
   GtkTextViewPrivate *priv = text_view->priv;
   GtkTextBuffer *buffer;
   GtkTextIter start, end;
@@ -5773,7 +5786,7 @@ gtk_text_view_click_gesture_released (GtkGestureClick *gesture,
 
   if (gtk_text_iter_compare (&start, &end) == 0 &&
       gtk_text_iter_can_insert (&start, priv->editable))
-    gtk_im_context_activate_osk (priv->im_context);
+    gtk_im_context_activate_osk (priv->im_context, event);
 }
 
 static void
@@ -6069,28 +6082,35 @@ gtk_text_view_remove (GtkTextView *text_view,
 static gboolean
 cursor_blinks (GtkTextView *text_view)
 {
-  GtkSettings *settings = gtk_widget_get_settings (GTK_WIDGET (text_view));
-  gboolean blink;
+  GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (text_view));
 
 #ifdef DEBUG_VALIDATION_AND_SCROLLING
   return FALSE;
 #endif
 
-  g_object_get (settings, "gtk-cursor-blink", &blink, NULL);
-
-  if (!blink)
-    return FALSE;
-
-  if (text_view->priv->editable)
+  if (gtk_widget_get_mapped (GTK_WIDGET (text_view)) &&
+      gtk_window_is_active (GTK_WINDOW (root)) &&
+      gtk_widget_has_focus (GTK_WIDGET (text_view)))
     {
-      GtkTextMark *insert;
-      GtkTextIter iter;
+      GtkSettings *settings = gtk_widget_get_settings (GTK_WIDGET (text_view));
+      gboolean blink;
 
-      insert = gtk_text_buffer_get_insert (get_buffer (text_view));
-      gtk_text_buffer_get_iter_at_mark (get_buffer (text_view), &iter, insert);
+      g_object_get (settings, "gtk-cursor-blink", &blink, NULL);
 
-      if (gtk_text_iter_editable (&iter, text_view->priv->editable))
-	return blink;
+      if (!blink)
+        return FALSE;
+
+      if (text_view->priv->editable)
+        {
+          GtkTextMark *insert;
+          GtkTextIter iter;
+
+          insert = gtk_text_buffer_get_insert (get_buffer (text_view));
+          gtk_text_buffer_get_iter_at_mark (get_buffer (text_view), &iter, insert);
+
+          if (gtk_text_iter_editable (&iter, text_view->priv->editable))
+            return blink;
+        }
     }
 
   return FALSE;
@@ -8734,11 +8754,11 @@ gtk_text_view_retrieve_surrounding_handler (GtkIMContext  *context,
   gboolean flip;
 
   gtk_text_buffer_get_iter_at_mark (text_view->priv->buffer, &start,
-                                    gtk_text_buffer_get_insert (text_view->priv->buffer));
-  gtk_text_buffer_get_iter_at_mark (text_view->priv->buffer, &end,
                                     gtk_text_buffer_get_selection_bound (text_view->priv->buffer));
+  gtk_text_buffer_get_iter_at_mark (text_view->priv->buffer, &end,
+                                    gtk_text_buffer_get_insert (text_view->priv->buffer));
 
-  flip = gtk_text_iter_compare (&start, &end) < 0;
+  flip = gtk_text_iter_compare (&start, &end) > 0;
 
   gtk_text_iter_order (&start, &end);
 
@@ -8764,13 +8784,13 @@ gtk_text_view_retrieve_surrounding_handler (GtkIMContext  *context,
 
   if (flip)
     {
-      anchor_pos = strlen (pre);
-      cursor_pos = anchor_pos + strlen (sel);
+      cursor_pos = strlen (pre);
+      anchor_pos = cursor_pos + strlen (sel);
     }
   else
     {
-      cursor_pos = strlen (pre);
-      anchor_pos = cursor_pos + strlen (sel);
+      anchor_pos = strlen (pre);
+      cursor_pos = anchor_pos + strlen (sel);
     }
 
   text = g_strconcat (pre, sel, post, NULL);

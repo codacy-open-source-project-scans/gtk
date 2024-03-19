@@ -22,135 +22,72 @@ gsk_ensure_resources (void)
 }
 
 /*< private >
- * gsk_get_scaled_font:
+ * gsk_reload_font:
  * @font: a `PangoFont`
- * @scale: the scale
- *
- * Returns a font that is just like @font, at a size that
- * is multiplied by @scale.
- *
- * Returns: (transfer full): a scaled version of @font
- */
-PangoFont *
-gsk_get_scaled_font (PangoFont *font,
-                     float      scale)
-{
-  if (scale == 1.0)
-    return g_object_ref (font);
-
-#if PANGO_VERSION_CHECK (1, 52, 0)
-  return pango_font_map_reload_font (pango_font_get_font_map (font), font, scale, NULL, NULL);
-#else
-  GHashTable *fonts;
-  int key;
-  PangoFont *font2;
-  PangoFontDescription *desc;
-  int size;
-  PangoFontMap *fontmap;
-  PangoContext *context;
-  cairo_scaled_font_t *sf;
-  cairo_font_options_t *options;
-  FcPattern *pattern;
-  double dpi;
-
-  key = (int) roundf (scale * PANGO_SCALE);
-
-  fonts = (GHashTable *) g_object_get_data (G_OBJECT (font), "gsk-scaled-fonts");
-
-  if (fonts)
-    {
-      font2 = g_hash_table_lookup (fonts, GINT_TO_POINTER (key));
-      if (font2)
-        return g_object_ref (font2);
-    }
-  else
-    {
-      fonts = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_object_unref);
-      g_object_set_data_full (G_OBJECT (font), "gsk-scaled-fonts",
-                              fonts, (GDestroyNotify) g_hash_table_unref);
-    }
-
-  desc = pango_font_describe (font);
-  size = pango_font_description_get_size (desc);
-
-  if (pango_font_description_get_size_is_absolute (desc))
-    pango_font_description_set_absolute_size (desc, size * scale);
-  else
-    pango_font_description_set_size (desc, (int) roundf (size * scale));
-
-  fontmap = pango_font_get_font_map (font);
-  context = pango_font_map_create_context (fontmap);
-
-  sf = pango_cairo_font_get_scaled_font (PANGO_CAIRO_FONT (font));
-  options = cairo_font_options_create ();
-  cairo_scaled_font_get_font_options (sf, options);
-  pango_cairo_context_set_font_options (context, options);
-  cairo_font_options_destroy (options);
-
-  pattern = pango_fc_font_get_pattern (PANGO_FC_FONT (font));
-  if (FcPatternGetDouble (pattern, FC_DPI, 0, &dpi) == FcResultMatch)
-    pango_cairo_context_set_resolution (context, dpi);
-
-  font2 = pango_font_map_load_font (fontmap, context, desc);
-
-  pango_font_description_free (desc);
-  g_object_unref (context);
-
-  g_hash_table_insert (fonts, GINT_TO_POINTER (key), font2);
-
-  return g_object_ref (font2);
-#endif
-}
-
-/*< private >
- * gsk_get_hinted_font:
- * @font: a `PangoFont`
+ * @scale: the scale to apply
+ * @hint_metris: hint metrics to use or `CAIRO_HINT_METRICS_DEFAILT` to keep the
+ *   hint metrics of the font unchanged
  * @hint_style: hint style to use or `CAIRO_HINT_STYLE_DEFAULT` to keep the
  *   hint style of @font unchanged
  * @antialias: antialiasing to use, or `CAIRO_ANTIALIAS_DEFAULT` to keep the
  *   antialias option of @font unchanged
  *
  * Returns a font that is just like @font, but uses the
- * given hinting options for its glyphs and metrics.
+ * given scale and hinting options for its glyphs and metrics.
  *
  * Returns: (transfer full): the modified `PangoFont`
  */
 PangoFont *
-gsk_get_hinted_font (PangoFont          *font,
-                     cairo_hint_style_t  hint_style,
-                     cairo_antialias_t   antialias)
+gsk_reload_font (PangoFont            *font,
+                 float                 scale,
+                 cairo_hint_metrics_t  hint_metrics,
+                 cairo_hint_style_t    hint_style,
+                 cairo_antialias_t     antialias)
 {
-  cairo_font_options_t *options;
-  cairo_scaled_font_t *sf;
+  static cairo_font_options_t *options = NULL;
   static PangoContext *context = NULL;
+  cairo_scaled_font_t *sf;
 #if !PANGO_VERSION_CHECK (1, 52, 0)
   PangoFontDescription *desc;
   FcPattern *pattern;
   double dpi;
+  int size;
 #endif
 
   /* These requests often come in sequentially so keep the result
    * around and re-use it if everything matches.
    */
   static PangoFont *last_font;
+  static float last_scale;
+  static cairo_hint_metrics_t last_hint_metrics;
   static cairo_hint_style_t last_hint_style;
   static cairo_antialias_t last_antialias;
   static PangoFont *last_result;
 
   if (last_result != NULL &&
       last_font == font &&
+      last_scale == scale &&
+      last_hint_metrics == hint_metrics &&
       last_hint_style == hint_style &&
       last_antialias == antialias)
     return g_object_ref (last_result);
 
+  last_scale = scale;
+  last_hint_metrics = hint_metrics;
   last_hint_style = hint_style;
   last_antialias = antialias;
+
   g_set_object (&last_font, font);
   g_clear_object (&last_result);
 
-  options = cairo_font_options_create ();
+  if (G_UNLIKELY (options == NULL))
+    options = cairo_font_options_create ();
+
   sf = pango_cairo_font_get_scaled_font (PANGO_CAIRO_FONT (font));
   cairo_scaled_font_get_font_options (sf, options);
+
+  if (hint_metrics == CAIRO_HINT_METRICS_DEFAULT)
+    hint_metrics = cairo_font_options_get_hint_metrics (options);
 
   if (hint_style == CAIRO_HINT_STYLE_DEFAULT)
     hint_style = cairo_font_options_get_hint_style (options);
@@ -158,36 +95,37 @@ gsk_get_hinted_font (PangoFont          *font,
   if (antialias == CAIRO_ANTIALIAS_DEFAULT)
     antialias = cairo_font_options_get_antialias (options);
 
-  if (cairo_font_options_get_hint_style (options) == hint_style &&
+  if (1.0 == scale &&
+      cairo_font_options_get_hint_metrics (options) == hint_metrics &&
+      cairo_font_options_get_hint_style (options) == hint_style &&
       cairo_font_options_get_antialias (options) == antialias &&
-      cairo_font_options_get_hint_metrics (options) == CAIRO_HINT_METRICS_OFF &&
       cairo_font_options_get_subpixel_order (options) == CAIRO_SUBPIXEL_ORDER_DEFAULT)
     {
       last_result = g_object_ref (font);
-      cairo_font_options_destroy (options);
       return g_object_ref (font);
     }
 
+  cairo_font_options_set_hint_metrics (options, hint_metrics);
   cairo_font_options_set_hint_style (options, hint_style);
   cairo_font_options_set_antialias (options, antialias);
-  cairo_font_options_set_hint_metrics (options, CAIRO_HINT_METRICS_OFF);
   cairo_font_options_set_subpixel_order (options, CAIRO_SUBPIXEL_ORDER_DEFAULT);
 
-  if (!context)
+  if (G_UNLIKELY (context == NULL))
     context = pango_context_new ();
 
   pango_cairo_context_set_font_options (context, options);
-  cairo_font_options_destroy (options);
 
 #if PANGO_VERSION_CHECK (1, 52, 0)
-  last_result = pango_font_map_reload_font (pango_font_get_font_map (font), font, 1.0, context, NULL);
+  last_result = pango_font_map_reload_font (pango_font_get_font_map (font), font, scale, context, NULL);
 #else
 
   pattern = pango_fc_font_get_pattern (PANGO_FC_FONT (font));
   if (FcPatternGetDouble (pattern, FC_DPI, 0, &dpi) == FcResultMatch)
     pango_cairo_context_set_resolution (context, dpi);
 
-  desc = pango_font_describe (font);
+  desc = pango_font_describe_with_absolute_size (font);
+  size = pango_font_description_get_size (desc);
+  pango_font_description_set_absolute_size (desc, size * scale);
   last_result = pango_font_map_load_font (pango_font_get_font_map (font), context, desc);
   pango_font_description_free (desc);
 #endif
@@ -213,9 +151,11 @@ gsk_get_unhinted_glyph_string_extents (PangoGlyphString *glyphs,
 {
   PangoFont *unhinted;
 
-  unhinted = gsk_get_hinted_font (font,
-                                  CAIRO_HINT_STYLE_NONE,
-                                  CAIRO_ANTIALIAS_DEFAULT);
+  unhinted = gsk_reload_font (font,
+                              1.0,
+                              CAIRO_HINT_METRICS_OFF,
+                              CAIRO_HINT_STYLE_NONE,
+                              CAIRO_ANTIALIAS_DEFAULT);
 
   pango_glyph_string_extents (glyphs, unhinted, ink_rect, NULL);
 
@@ -233,15 +173,16 @@ gsk_get_unhinted_glyph_string_extents (PangoGlyphString *glyphs,
 cairo_hint_style_t
 gsk_font_get_hint_style (PangoFont *font)
 {
+  static cairo_font_options_t *options = NULL;
   cairo_scaled_font_t *sf;
-  cairo_font_options_t *options;
   cairo_hint_style_t style;
 
+  if (G_UNLIKELY (options == NULL))
+    options = cairo_font_options_create ();
+
   sf = pango_cairo_font_get_scaled_font (PANGO_CAIRO_FONT (font));
-  options = cairo_font_options_create ();
   cairo_scaled_font_get_font_options (sf, options);
   style = cairo_font_options_get_hint_style (options);
-  cairo_font_options_destroy (options);
 
   return style;
 }
